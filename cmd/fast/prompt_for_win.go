@@ -6,15 +6,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/linkease/fastpve/downloader"
 	"github.com/linkease/fastpve/quickget"
 	"github.com/linkease/fastpve/utils"
+	"github.com/linkease/fastpve/vmdownloader"
 	"github.com/manifoldco/promptui"
 )
 
@@ -46,7 +45,7 @@ func promptInstallWindows() error {
 	cachePath := "/var/lib/vz/template/cache"
 	downer := newDownloader()
 	statusPath := filepath.Join(cachePath, "windows_install.ops")
-	status, _ := isStatusValid(downer, statusPath)
+	status, _ := vmdownloader.IsStatusValid(downer, statusPath)
 
 	var windows []string
 	var virtio []string
@@ -141,84 +140,13 @@ func promptInstallWindows() error {
 
 	if status != nil && info.WindowISO == status.TargetFile {
 		// Continue download target file
-		realPath := strings.TrimSuffix(status.TargetFile, ".syn")
-		fmt.Println("downloading:", filepath.Base(realPath))
-		err = downloadURL(ctx, downer, statusPath, status)
-		if err != nil {
-			return err
-		}
-		info.WindowISO = realPath
-		err = os.Rename(status.TargetFile, info.WindowISO)
+		info.WindowISO, err = vmdownloader.DownloadWindowsISO(ctx, downer, quickGet, isoPath, statusPath, status, -1, "")
 		if err != nil {
 			return err
 		}
 	}
 	if info.WinVersion >= 0 && info.WinEdition >= 0 {
-		if status != nil {
-			os.Remove(status.TargetFile)
-			os.Remove(statusPath)
-			status = nil
-		}
-		// Create new download file
-		var winVer string
-		if info.WinVersion == Win11 {
-			winVer = "11"
-		} else {
-			winVer = "10"
-		}
-		tag := strings.Join([]string{
-			"windows",
-			winVer,
-			utils.CleanString(winEditions[info.WinEdition]),
-		}, "-")
-		args := []string{"--url", "windows", winVer, winEditions[info.WinEdition]}
-		fmt.Println("获取下载URL...")
-		var totalSize int64
-		var modTime time.Time
-		urlStr, _ := quickget.GetSystemURL(ctx, quickGet, args)
-		if urlStr != "" {
-			fmt.Println("获取下载URL成功，开始下载:", urlStr)
-			if err := downer.PutRemoteURL(ctx, tag, urlStr); err != nil && !errors.Is(err, downloader.ErrRemoteURLCacheDisabled) {
-				return err
-			}
-			totalSize, modTime, err = downer.HeadInfo(urlStr)
-			if err != nil {
-				return err
-			}
-		} else if downer.RemoteURLCacheEnabled() {
-			fmt.Println("获取下载URL失败，重新获取...")
-			urls, err := downer.GetRemoteURLs(ctx, tag)
-			if err != nil {
-				return err
-			}
-			for _, urlTmp := range urls {
-				if strings.Contains(urlTmp, "virtio-win") {
-					continue
-				}
-				totalSize, modTime, err = downer.HeadInfo(urlTmp)
-				if err == nil {
-					urlStr = urlTmp
-					fmt.Println("重新获取URL成功，开始下载:", urlStr)
-					break
-				}
-			}
-		} else {
-			return errors.New("获取下载URL失败，且未启用远程缓存")
-		}
-		status = &downloader.DownloadStatus{
-			Url:        urlStr,
-			TargetFile: filepath.Join(isoPath, tag+".iso.syn"),
-			TotalSize:  totalSize,
-			ModTime:    modTime,
-		}
-		realPath := strings.TrimSuffix(status.TargetFile, ".syn")
-		fmt.Println("downloading:", filepath.Base(realPath))
-		err = downloadURL(ctx, downer, statusPath, status)
-		if err != nil {
-			return err
-		}
-		info.WindowISO = realPath
-		err = os.Rename(status.TargetFile, info.WindowISO)
+		info.WindowISO, err = vmdownloader.DownloadWindowsISO(ctx, downer, quickGet, isoPath, statusPath, status, info.WinVersion, winEditions[info.WinEdition])
 		if err != nil {
 			return err
 		}
@@ -226,14 +154,8 @@ func promptInstallWindows() error {
 
 	if info.VirtIO == "" {
 		virtStatusPath := filepath.Join(cachePath, "windows_virtio.ops")
-		virtStatus, _ := isStatusValid(downer, virtStatusPath)
-		var realPath string
-		realPath, err = downloadVirtIO(ctx, downer, isoPath, virtStatusPath, virtStatus)
-		if err != nil {
-			return err
-		}
-		info.VirtIO = realPath
-		err = os.Rename(virtStatus.TargetFile, realPath)
+		virtStatus, _ := vmdownloader.IsStatusValid(downer, virtStatusPath)
+		info.VirtIO, err = vmdownloader.DownloadVirtIO(ctx, downer, isoPath, virtStatusPath, virtStatus)
 		if err != nil {
 			return err
 		}
@@ -362,50 +284,6 @@ func promptWinDownloadInstall(info *windowsInstallInfo, needDownload bool) (bool
 		}
 	}
 	return false, nil
-}
-
-func downloadVirtIO(ctx context.Context,
-	downer *downloader.Downloader,
-	isoPath string,
-	virtStatusPath string,
-	virtStatus *downloader.DownloadStatus) (string, error) {
-	if virtStatus != nil {
-		realPath := strings.TrimSuffix(virtStatus.TargetFile, ".syn")
-		fmt.Println("downloading:", filepath.Base(realPath), "url=\n", virtStatus.Url)
-		err := downloadURL(ctx, downer, virtStatusPath, virtStatus)
-		if err == nil {
-			return realPath, nil
-		}
-	}
-
-	urls := []string{
-		"https://dl.istoreos.com/iStoreOS/Virtual/virtio-win-0.1.271.iso",
-		"https://fw0.koolcenter.com/iStoreOS/Virtual/virtio-win-0.1.271.iso",
-		"https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.271-1/virtio-win-0.1.271.iso",
-	}
-	var virtioURL string
-	var totalSize int64
-	var modTime time.Time
-	var err error
-	for _, s := range urls {
-		totalSize, modTime, err = downer.HeadInfo(s)
-		if err == nil {
-			virtioURL = s
-			break
-		}
-	}
-
-	virtStatus = &downloader.DownloadStatus{
-		Url:        virtioURL,
-		TargetFile: filepath.Join(isoPath, path.Base(virtioURL)+".syn"),
-		TotalSize:  totalSize,
-		ModTime:    modTime,
-	}
-
-	realPath := strings.TrimSuffix(virtStatus.TargetFile, ".syn")
-	fmt.Println("downloading:", filepath.Base(realPath), "url=\n", virtStatus.Url)
-	err = downloadURL(ctx, downer, virtStatusPath, virtStatus)
-	return realPath, err
 }
 
 func createWindowVM(ctx context.Context, info *windowsInstallInfo) error {

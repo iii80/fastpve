@@ -4,18 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/linkease/fastpve/downloader"
 	"github.com/linkease/fastpve/quickget"
 	"github.com/linkease/fastpve/utils"
+	"github.com/linkease/fastpve/vmdownloader"
 	"github.com/manifoldco/promptui"
 )
 
@@ -38,7 +35,7 @@ func promptForIstore() error {
 	cachePath := "/var/lib/vz/template/cache"
 	downer := newDownloader()
 	statusPath := filepath.Join(cachePath, "istore_install.ops")
-	status, _ := isStatusValid(downer, statusPath)
+	status, _ := vmdownloader.IsStatusValid(downer, statusPath)
 
 	var istoreIMGs []string
 	dirs, err := os.ReadDir(isoPath)
@@ -85,36 +82,15 @@ func promptForIstore() error {
 	ctx := context.TODO()
 	if status != nil && info.IstoreIMG == status.TargetFile {
 		// Continue download target file
-		info.IstoreIMG, err = downloadIstoreIMG(ctx, downer, status, isoPath, cachePath, statusPath)
+		info.IstoreIMG, err = vmdownloader.DownloadIstoreIMG(ctx, downer, isoPath, cachePath, statusPath, status, -1)
 		if err != nil {
 			return err
 		}
 	}
 	// 全新下载走这个逻辑
 	if info.IstoreVer >= 0 {
-		// 先获取下载url
-		urls, err := getIstoreUrls(ctx, downer, info.IstoreVer)
-		if err != nil {
-			urls = defaultIstoreUrls(info.IstoreVer)
-		}
-		// 创建状态文件，记录下载的进度
-		var urlStr string
-		var totalSize int64
-		var modTime time.Time
-		for _, s := range urls {
-			totalSize, modTime, err = downer.HeadInfo(s)
-			if err == nil {
-				urlStr = s
-				break
-			}
-		}
-		status = &downloader.DownloadStatus{
-			Url:        urlStr,
-			TargetFile: filepath.Join(cachePath, path.Base(urlStr)),
-			TotalSize:  totalSize,
-			ModTime:    modTime,
-		}
-		info.IstoreIMG, err = downloadIstoreIMG(ctx, downer, status, isoPath, cachePath, statusPath)
+		status = nil
+		info.IstoreIMG, err = vmdownloader.DownloadIstoreIMG(ctx, downer, isoPath, cachePath, statusPath, status, info.IstoreVer)
 		if err != nil {
 			return err
 		}
@@ -206,72 +182,6 @@ func promptIstoreDownloadInstall(info *istoreInstallInfo, needDownload bool) (bo
 		}
 	}
 	return false, nil
-}
-
-func defaultIstoreUrls(ver int) []string {
-	if ver == 0 {
-		return []string{
-			"https://dl.istoreos.com/iStoreOS/x86_64_efi/istoreos-24.10.1-2025052311-x86-64-squashfs-combined-efi.img.gz",
-		}
-	} else {
-		return []string{
-			"https://dl.istoreos.com/iStoreOS-22.03/x86_64_efi/istoreos-22.03.7-2025051615-x86-64-squashfs-combined-efi.img.gz",
-		}
-	}
-}
-
-func getIstoreUrls(ctx context.Context, downer *downloader.Downloader, ver int) ([]string, error) {
-	var name string
-	if ver == 0 {
-		name = "iStoreOS"
-	} else {
-		name = "iStoreOS-22.03"
-	}
-	versionStr := fmt.Sprintf("https://fw0.koolcenter.com/%s/x86_64_efi/version.index", name)
-	client := downer.DefaultClient()
-	req, err := http.NewRequestWithContext(ctx, "GET", versionStr, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	versionResp, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return nil, err
-	}
-	lastVer := strings.Replace(string(versionResp), "\n", "", -1)
-	return []string{
-		fmt.Sprintf("https://dl.istoreos.com/%s/x86_64_efi/istoreos-%s-x86-64-squashfs-combined-efi.img.gz", name, lastVer),
-		fmt.Sprintf("https://fw0.koolcenter.com/%s/x86_64_efi/istoreos-%s-x86-64-squashfs-combined-efi.img.gz", name, lastVer),
-	}, nil
-
-}
-
-func downloadIstoreIMG(ctx context.Context,
-	downer *downloader.Downloader,
-	status *downloader.DownloadStatus,
-	isoPath, cachePath, statusPath string) (string, error) {
-	baseFileName := filepath.Base(status.TargetFile)
-	fmt.Println("downloading:", baseFileName, "url=\n", status.Url)
-	err := downloadURL(ctx, downer, statusPath, status)
-	if err != nil {
-		return "", err
-	}
-	fmt.Println("download OK, unzipping and moving file...")
-	targetFileName := strings.TrimSuffix(baseFileName, ".gz")
-	targetFilePath := filepath.Join(isoPath, targetFileName)
-	err = utils.BatchRun(ctx, []string{
-		fmt.Sprintf("gunzip -k %s", status.TargetFile),
-		fmt.Sprintf("mv %s/%s %s", cachePath, targetFileName, targetFilePath),
-		fmt.Sprintf("rm -f %s", status.TargetFile),
-	}, 0)
-	if err != nil {
-		return "", err
-	}
-	return targetFileName, nil
 }
 
 func createIstoreVM(ctx context.Context, isoPath string, info *istoreInstallInfo) error {

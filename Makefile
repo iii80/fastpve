@@ -7,12 +7,14 @@ BUILD_FLAGS ?= -trimpath -a -ldflags "$(LD_FLAGS_BASE)"
 BIN_DIR ?= bin
 BINARY ?= $(BIN_DIR)/FastPVE
 CMD ?= ./cmd/fast
+DOWNLOAD_CMD ?= ./cmd/download
 WORKFILE ?= go.work
 WORKFILE_ABS := $(abspath $(WORKFILE))
 RELEASE_BINARY ?= $(BIN_DIR)/FastPVE-$(VERSION)
 VERSION_FILE ?= $(BIN_DIR)/version.txt
+BINARY_DOWNLOAD ?= $(BIN_DIR)/fastpve-download
 
-.PHONY: all build build-remote clean release validate-version
+.PHONY: all build build-remote download download-remote clean release validate-version
 
 all: build
 
@@ -23,6 +25,14 @@ build: $(BIN_DIR)
 # Build with HAS_REMOTE_URL; use go.work so the replace for remote cache is applied.
 build-remote: $(BIN_DIR) $(WORKFILE)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) GOWORK=$(WORKFILE_ABS) $(GO) build $(BUILD_FLAGS) -tags HAS_REMOTE_URL -o $(BINARY) $(CMD)
+
+# Build download-only CLI without HAS_REMOTE_URL.
+download: $(BIN_DIR)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) GOWORK=off $(GO) build $(BUILD_FLAGS) -o $(BINARY_DOWNLOAD) $(DOWNLOAD_CMD)
+
+# Build download-only CLI with HAS_REMOTE_URL.
+download-remote: $(BIN_DIR) $(WORKFILE)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) GOWORK=$(WORKFILE_ABS) $(GO) build $(BUILD_FLAGS) -tags HAS_REMOTE_URL -o $(BINARY_DOWNLOAD) $(DOWNLOAD_CMD)
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)

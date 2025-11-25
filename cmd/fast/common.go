@@ -1,30 +1,12 @@
 package main
 
 import (
-	"errors"
 	"strconv"
 	"strings"
 
-	"github.com/linkease/fastpve/downloader"
 	"github.com/linkease/fastpve/utils"
 	"github.com/manifoldco/promptui"
 )
-
-func isStatusValid(downer *downloader.Downloader, statusPath string) (*downloader.DownloadStatus, error) {
-	var statusValid bool
-	status, err := downloader.ReadUpdateDownload(statusPath)
-	if err == nil {
-		remoteSize, remoteModTime, err := downer.HeadInfo(status.Url)
-		if err != nil {
-			return nil, err
-		}
-		statusValid = downer.DownloadStatusVerify(status, remoteSize, remoteModTime)
-		if !statusValid {
-			return nil, errors.New("download status is invalid")
-		}
-	}
-	return status, err
-}
 
 func selectNumber(label1, label2 string,
 	items []string,

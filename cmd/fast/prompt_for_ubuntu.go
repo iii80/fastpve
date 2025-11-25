@@ -5,15 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/linkease/fastpve/downloader"
 	"github.com/linkease/fastpve/quickget"
 	"github.com/linkease/fastpve/utils"
+	"github.com/linkease/fastpve/vmdownloader"
 	"github.com/manifoldco/promptui"
 )
 
@@ -40,7 +39,7 @@ func promptForUbuntu() error {
 	cachePath := "/var/lib/vz/template/cache"
 	downer := newDownloader()
 	statusPath := filepath.Join(cachePath, "ubuntu_install.ops")
-	status, _ := isStatusValid(downer, statusPath)
+	status, _ := vmdownloader.IsStatusValid(downer, statusPath)
 
 	var ubuntuISOs []string
 	dirs, err := os.ReadDir(isoPath)
@@ -86,33 +85,14 @@ func promptForUbuntu() error {
 	ctx := context.TODO()
 	if status != nil && info.UbuntuISO == status.TargetFile {
 		// Continue download target file
-		info.UbuntuISO, err = downloadUbuntuISO(ctx, downer, status, isoPath, cachePath, statusPath)
+		info.UbuntuISO, err = vmdownloader.DownloadUbuntuISO(ctx, downer, isoPath, cachePath, statusPath, status, -1)
 		if err != nil {
 			return err
 		}
 	}
 	if info.UbuntuVer >= 0 {
-		urls, err := getUbuntuUrls(ctx, downer, info.UbuntuVer)
-		if err != nil {
-			urls = defaultUbuntuUrls(info.UbuntuVer)
-		}
-		var urlStr string
-		var totalSize int64
-		var modTime time.Time
-		for _, s := range urls {
-			totalSize, modTime, err = downer.HeadInfo(s)
-			if err == nil {
-				urlStr = s
-				break
-			}
-		}
-		status = &downloader.DownloadStatus{
-			Url:        urlStr,
-			TargetFile: filepath.Join(cachePath, path.Base(urlStr)),
-			TotalSize:  totalSize,
-			ModTime:    modTime,
-		}
-		info.UbuntuISO, err = downloadUbuntuISO(ctx, downer, status, isoPath, cachePath, statusPath)
+		status = nil
+		info.UbuntuISO, err = vmdownloader.DownloadUbuntuISO(ctx, downer, isoPath, cachePath, statusPath, status, info.UbuntuVer)
 		if err != nil {
 			return err
 		}
@@ -201,81 +181,6 @@ func promptUbuntuDownloadInstall(info *ubuntuInstallInfo, needDownload bool) (bo
 		}
 	}
 	return false, nil
-}
-
-func defaultUbuntuUrls(ver int) []string {
-	var versionStr1, versionStr2, versionStr3 string
-	if ver&1 == 0 {
-		versionStr3 = "desktop"
-	} else {
-		versionStr3 = "live-server"
-	}
-	switch ver {
-	case Ubuntu2204ForDesk, Ubuntu2204ForServer:
-		versionStr1 = "22.04"
-		versionStr2 = "22.04.5"
-	case Ubuntu2410ForDesk, Ubuntu2410ForServer:
-		versionStr1 = "24.10"
-		versionStr2 = "24.10"
-	case Ubuntu2504ForDesk, Ubuntu2504ForServer:
-		versionStr1 = "25.04"
-		versionStr2 = "25.04"
-	}
-	return []string{
-		fmt.Sprintf("https://mirrors.ustc.edu.cn/ubuntu-releases/%s/ubuntu-%s-%s-amd64.iso", versionStr1, versionStr2, versionStr3),
-	}
-}
-
-func getUbuntuUrls(ctx context.Context, downer *downloader.Downloader, ver int) ([]string, error) {
-	var versionStr1, versionStr2, versionStr3 string
-
-	if ver&1 == 0 {
-		versionStr3 = "desktop"
-	} else {
-		versionStr3 = "live-server"
-	}
-
-	switch ver {
-	case Ubuntu2204ForDesk, Ubuntu2204ForServer:
-		versionStr1 = "22.04"
-		versionStr2 = "22.04.5"
-	case Ubuntu2410ForDesk, Ubuntu2410ForServer:
-		versionStr1 = "24.10"
-		versionStr2 = "24.10"
-	case Ubuntu2504ForDesk, Ubuntu2504ForServer:
-		versionStr1 = "25.04"
-		versionStr2 = "25.04"
-	default:
-		return nil, fmt.Errorf("unknown Ubuntu version: %d", ver)
-	}
-	return []string{
-		// 中科大
-		fmt.Sprintf("https://mirrors.ustc.edu.cn/ubuntu-releases/%s/ubuntu-%s-%s-amd64.iso", versionStr1, versionStr2, versionStr3),
-		// 清华
-		fmt.Sprintf("https://mirrors.tuna.tsinghua.edu.cn/ubuntu-releases/%s/ubuntu-%s-%s-amd64.iso", versionStr1, versionStr2, versionStr3),
-		// 华为
-		fmt.Sprintf("https://repo.huaweicloud.com/ubuntu-releases/%s/ubuntu-%s-%s-amd64.iso", versionStr1, versionStr2, versionStr3),
-		// 官方
-		fmt.Sprintf("https://releases.ubuntu.com/%s/ubuntu-%s-%s-amd64.iso", versionStr1, versionStr2, versionStr3),
-	}, nil
-}
-
-func downloadUbuntuISO(ctx context.Context,
-	downer *downloader.Downloader,
-	status *downloader.DownloadStatus,
-	isoPath, cachePath, statusPath string) (string, error) {
-	baseFileName := filepath.Base(status.TargetFile)
-	fmt.Println("downloading:", baseFileName, "url=\n", status.Url)
-	err := downloadURL(ctx, downer, statusPath, status)
-	if err != nil {
-		return "", err
-	}
-	targetFilePath := filepath.Join(isoPath, baseFileName)
-	err = os.Rename(status.TargetFile, targetFilePath)
-	if err != nil {
-		return "", err
-	}
-	return targetFilePath, nil
 }
 
 func createUbuntuVM(ctx context.Context, isoPath string, info *ubuntuInstallInfo) error {

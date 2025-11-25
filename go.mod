@@ -6,6 +6,7 @@ require (
 	github.com/kspeeder/urlcache v0.0.0-20251125050822-bf2b496b4f24
 	github.com/manifoldco/promptui v0.9.0
 	github.com/urfave/cli/v2 v2.27.6
+	github.com/urfave/cli/v3 v3.6.1
 )
 
 require (
