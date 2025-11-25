@@ -1,7 +1,7 @@
 GO ?= go
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
-VERSION ?=
+VERSION ?= 0.1.7
 LD_FLAGS_BASE ?= -s -w -extldflags '-static'
 BUILD_FLAGS ?= -trimpath -a -ldflags "$(LD_FLAGS_BASE)"
 BIN_DIR ?= bin
