@@ -355,15 +355,28 @@ func createWindowVM(ctx context.Context, info *windowsInstallInfo) error {
 	}
 	winName := filepath.Base(info.WindowISO)
 	vmName := toBetterWindowName(winName)
+	bios := "ovmf"
+	machine := "q35"
+	needEFI := true
+	if info.WinVersion == Win7 {
+		bios = "seabios"
+		needEFI = false
+	}
 	scripts := []string{
 		"set -e",
 		`export LC_ALL="en_US.UTF-8"`,
 		fmt.Sprintf("export VMID=%d", vmid),
-		fmt.Sprintf(`qm create $VMID --name "%s" --memory %d --scsihw virtio-scsi-single --cores %d --sockets 1 --machine q35 --bios ovmf --cpu host --net0 virtio,bridge=vmbr0`,
+		fmt.Sprintf(`qm create $VMID --name "%s" --memory %d --scsihw virtio-scsi-single --cores %d --sockets 1 --machine %s --bios %s --cpu host --net0 virtio,bridge=vmbr0`,
 			vmName,
 			info.Memory,
-			info.Cores),
-		fmt.Sprintf("qm set $VMID -efidisk0 %s:1,format=raw,efitype=4m,pre-enrolled-keys=1", useDisk),
+			info.Cores,
+			machine,
+			bios),
+	}
+	if needEFI {
+		scripts = append(scripts, fmt.Sprintf("qm set $VMID -efidisk0 %s:1,format=raw,efitype=4m,pre-enrolled-keys=1", useDisk))
+	}
+	scripts = append(scripts,
 		fmt.Sprintf("qm set $VMID --scsi0 %s:64", useDisk),
 		fmt.Sprintf(`qm set $VMID --ide0 local:iso/%s,media=cdrom`, winName),
 		fmt.Sprintf(`qm set $VMID --ide1 local:iso/%s,media=cdrom`, filepath.Base(info.VirtIO)),
@@ -372,7 +385,7 @@ func createWindowVM(ctx context.Context, info *windowsInstallInfo) error {
 		tpmStr,
 		fmt.Sprintf("qm set %d --ostype win%d", vmid, winID),
 		`echo "VMOK"`,
-	}
+	)
 	//fmt.Println(strings.Join(scripts, "\n"))
 	out, err := utils.BatchOutput(ctx, scripts, 0)
 	if err != nil {
