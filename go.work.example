@@ -1,0 +1,5 @@
+go 1.24.4
+
+use .
+
+replace github.com/kspeeder/urlcache => github.com/kspeeder/remoteurlcache v0.0.0-20251125031315-f4c68c6812ae
